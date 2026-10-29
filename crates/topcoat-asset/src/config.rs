@@ -6,7 +6,10 @@ use std::fmt;
 #[cfg(feature = "serve")]
 use std::path::PathBuf;
 
-use topcoat_core::context::{Cx, try_context};
+use topcoat_core::{
+    context::{Cx, try_context},
+    url_form::{UrlForm, url_form},
+};
 
 #[cfg(feature = "serve")]
 use crate::AssetBundle;
@@ -109,11 +112,17 @@ impl AssetConfig {
         }
     }
 
-    /// Writes the URL `asset` is hosted at, `{base_url}/{bundled-filename}`,
-    /// into `write`, percent-encoding the filename as a single path segment.
+    /// Writes the hosted URL of `asset` into `write` as
+    /// `{base_url}/{bundled-filename}`. The filename is percent-encoded as
+    /// one path segment.
     ///
-    /// This is how [`Asset`] values render in views; [`resolve`](Self::resolve)
-    /// returns the same URL as a `String`.
+    /// Uses the [URL form](url_form) in `cx`. When absolute URLs are requested,
+    /// an asset path relative to the site root gets the application's
+    /// [base URL](topcoat_core::base_url::base_url) added before it. This
+    /// includes assets served by the application.
+    ///
+    /// Views use this method to render [`Asset`] values.
+    /// [`resolve`](Self::resolve) returns the same URL as a `String`.
     ///
     /// # Errors
     ///
@@ -121,27 +130,35 @@ impl AssetConfig {
     ///
     /// # Panics
     ///
-    /// Panics if the catalog does not contain `asset`.
+    /// Panics if `asset` is missing from the catalog, or if resolving its URL
+    /// requires an application base URL that is missing from `cx`.
     #[track_caller]
-    pub fn fmt_url(&self, asset: Asset, write: &mut dyn fmt::Write) -> fmt::Result {
+    pub fn fmt_url(&self, cx: &Cx, asset: Asset, write: &mut dyn fmt::Write) -> fmt::Result {
         let Some(bundled) = self.get(asset) else {
             panic!("failed to resolve asset {asset:?} in the asset catalog");
         };
-        write.write_str(self.base_url())?;
+        let host = self.base_url();
+        // `//host/path` is relative to the scheme only, not to the site root.
+        if url_form(cx) == UrlForm::Absolute && host.starts_with('/') && !host.starts_with("//") {
+            write.write_str(topcoat_core::base_url::base_url(cx).as_str())?;
+        }
+        write.write_str(host)?;
         write.write_str("/")?;
         write!(write, "{}", bundled.encoded_name())
     }
 
-    /// Returns the URL `asset` is hosted at, `{base_url}/{bundled-filename}`.
+    /// Returns the hosted URL of `asset` as `{base_url}/{bundled-filename}`,
+    /// using the [URL form](url_form) in `cx`.
     ///
     /// # Panics
     ///
-    /// Panics if the catalog does not contain `asset`.
+    /// Panics if `asset` is missing from the catalog, or if resolving its URL
+    /// requires an application base URL that is missing from `cx`.
     #[must_use]
     #[track_caller]
-    pub fn resolve(&self, asset: Asset) -> String {
+    pub fn resolve(&self, cx: &Cx, asset: Asset) -> String {
         let mut url = String::new();
-        let _ = self.fmt_url(asset, &mut url);
+        let _ = self.fmt_url(cx, asset, &mut url);
         url
     }
 }
@@ -241,7 +258,7 @@ content_type = "image/png"
         let config = AssetConfig::hosted_at("https://cdn.example.com/assets", manifest);
 
         assert_eq!(
-            config.resolve(asset),
+            config.resolve(&Cx::new(), asset),
             "https://cdn.example.com/assets/logo-1a2b3c4d5e6f7a8b.png"
         );
     }
@@ -281,9 +298,68 @@ content_type = "image/png"
             let config = AssetConfig::hosted_at("https://cdn.example.com/assets", manifest);
 
             assert_eq!(
-                config.resolve(asset),
+                config.resolve(&Cx::new(), asset),
                 format!("https://cdn.example.com/assets/{encoded}")
             );
         }
+    }
+
+    /// Creates a test asset whose manifest names the bundled file
+    /// `logo-1a2b3c4d5e6f7a8b.png`.
+    fn logo() -> (Asset, Manifest) {
+        const OPTIONS: AssetOptions = AssetOptions::NONE;
+        const ID: AssetId = AssetId::new("app", "src/lib.rs", "logo.png", &OPTIONS);
+        static ENCODED: [u8; ENCODED_ASSET_SIZE] =
+            RawAsset::encode(ID, "logo.png", "app", "/app", "src/lib.rs", &OPTIONS);
+
+        let manifest = Manifest::parse(&format!(
+            r#"
+version = 1
+
+[[assets]]
+id = {}
+file = "logo-1a2b3c4d5e6f7a8b.png"
+hash = "0"
+content_type = "image/png"
+"#,
+            ID.as_u64()
+        ))
+        .unwrap();
+        (Asset::new(&ENCODED), manifest)
+    }
+
+    /// Creates a test context with absolute URLs based at `https://example.com`.
+    fn absolute() -> Cx {
+        Cx::new()
+            .with(UrlForm::Absolute)
+            .with(topcoat_core::base_url::BaseUrl::new("https://example.com").unwrap())
+    }
+
+    #[cfg(feature = "serve")]
+    #[test]
+    fn served_assets_get_the_base_url_in_the_absolute_form() {
+        let (asset, manifest) = logo();
+        let config = AssetConfig {
+            catalog: manifest.into(),
+            host: Host::Serve {
+                dir: PathBuf::new(),
+            },
+        };
+
+        assert_eq!(
+            config.resolve(&absolute(), asset),
+            format!("https://example.com{ASSET_ROUTE_PREFIX}/logo-1a2b3c4d5e6f7a8b.png")
+        );
+    }
+
+    #[test]
+    fn hosted_assets_keep_their_host_in_the_absolute_form() {
+        let (asset, manifest) = logo();
+        let config = AssetConfig::hosted_at("https://cdn.example.com/assets", manifest);
+
+        assert_eq!(
+            config.resolve(&absolute(), asset),
+            "https://cdn.example.com/assets/logo-1a2b3c4d5e6f7a8b.png"
+        );
     }
 }

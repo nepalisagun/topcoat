@@ -2955,6 +2955,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "metadata"
+version = "0.11.0"
+dependencies = [
+ "tokio",
+ "topcoat",
+]
+
+[[package]]
 name = "miette"
 version = "7.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5231,6 +5239,7 @@ dependencies = [
  "topcoat-l10n-macro",
  "topcoat-mail",
  "topcoat-mail-macro",
+ "topcoat-metadata",
  "topcoat-router",
  "topcoat-router-macro",
  "topcoat-runtime",
@@ -5552,6 +5561,21 @@ dependencies = [
  "tokio",
  "topcoat",
  "topcoat-mail-grammar",
+]
+
+[[package]]
+name = "topcoat-metadata"
+version = "0.11.0"
+dependencies = [
+ "tokio",
+ "topcoat",
+ "topcoat-asset",
+ "topcoat-core",
+ "topcoat-core-macro",
+ "topcoat-l10n",
+ "topcoat-router",
+ "topcoat-view",
+ "topcoat-view-macro",
 ]
 
 [[package]]
