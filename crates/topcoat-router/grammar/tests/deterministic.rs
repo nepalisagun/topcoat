@@ -97,15 +97,15 @@ fn not_found() {
 
 #[test]
 fn segment() {
-    assert_deterministic(|| syn::parse_str::<Segment>(r#"rename = "documentation""#));
-    assert_deterministic(|| syn::parse_str::<Segment>("kind = Group"));
+    assert_deterministic(|| syn::parse_str::<Segment>(r#"rename: "documentation""#));
+    assert_deterministic(|| syn::parse_str::<Segment>("kind: Group"));
 }
 
 #[test]
 fn path_param() {
     let inputs = [
         "slug",
-        "pub post_id: u64, error = bad_request",
+        "pub post_id: u64 else bad_request",
         "*rest",
         "*numbers: u32",
     ];
@@ -116,7 +116,7 @@ fn path_param() {
 
 #[test]
 fn module_param() {
-    assert_deterministic(|| syn::parse_str::<ModuleParam>("post_id: u32, error = not_found"));
+    assert_deterministic(|| syn::parse_str::<ModuleParam>("post_id: u32 else not_found"));
 }
 
 #[test]
