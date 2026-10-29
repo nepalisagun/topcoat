@@ -9,7 +9,9 @@ use clap::Args;
 use console::style;
 use tokio::{io::AsyncReadExt, process::Command};
 
-use super::{messages::Messages, progress::ProgressScanner, stderr::StderrTail};
+use super::{
+    messages::Messages, metadata::Metadata, progress::ProgressScanner, stderr::StderrTail,
+};
 
 /// Which target `cargo build` compiles and with which profile.
 #[derive(Clone, Default)]
@@ -29,8 +31,9 @@ impl BuildOpts {
         &self,
         mut on_progress: impl FnMut(u64, u64) + Send + 'static,
     ) -> Result<PathBuf, BuildError> {
+        let bin = self.bin().await;
         let mut child = self
-            .command()
+            .command(bin.as_deref())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
@@ -94,13 +97,25 @@ impl BuildOpts {
         Ok((path, bytes))
     }
 
-    /// The `cargo build` invocation for these options.
-    fn command(&self) -> Command {
+    /// The bin target to build: the one `--bin` names, or else the `[package]
+    /// default-run` of the package being built, the same one a bare `cargo run` picks.
+    /// Without either, `cargo build` links every bin target of the package.
+    async fn bin(&self) -> Option<String> {
+        if let Some(bin) = &self.bin {
+            return Some(bin.clone());
+        }
+        Metadata::workspace()
+            .await?
+            .default_run_for_build(self.package.as_deref())
+    }
+
+    /// The `cargo build` invocation for these options, building `bin` when given.
+    fn command(&self, bin: Option<&str>) -> Command {
         let mut cmd = Command::new("cargo");
         cmd.args(["build", "--message-format=json-diagnostic-rendered-ansi"]);
         cmd.env("CARGO_TERM_PROGRESS_WHEN", "always");
         cmd.env("CARGO_TERM_PROGRESS_WIDTH", "80");
-        if let Some(bin) = &self.bin {
+        if let Some(bin) = bin {
             cmd.args(["--bin", bin]);
         }
         if let Some(package) = &self.package {
